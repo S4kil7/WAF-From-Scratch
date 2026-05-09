@@ -1,34 +1,97 @@
-# Custom WAF — Phase 3
+# Custom WAF — Built from Scratch in Python
 
 A hand-built Web Application Firewall written in **pure Python (stdlib only)**.  
 It acts as a **reverse proxy**, inspects every HTTP request, and blocks attacks before they reach your vulnerable backend.
 
 ---
 
-## Architecture
+## Project context — Architecture
+
+This project is one piece of a larger lab environment. Three different defenses are deployed side-by-side in front of the same vulnerable target application ([DVWA — Damn Vulnerable Web App](https://github.com/digininja/DVWA)), so their behaviour can be directly compared:
 
 ```
-Browser / Attacker
-       │
-       ▼
-┌──────────────────┐  port 8090
-│   custom-waf     │  (this project)
-│   waf.py         │──────────────────────────┐
-└──────────────────┘                          │
-                                              ▼
-                                   ┌──────────────────┐  port 80 (internal)
-                                   │   dvwa-target    │
-                                   │   DVWA           │
-                                   └──────────────────┘
+                        ┌─────────────────────────────────────────────┐
+                        │              Your Machine                   │
+                        │                                             │
+  HTTP on port 8081 ───▶│  DVWA (unprotected)   — baseline, no WAF   │
+                        │                                             │
+  HTTP on port 8080 ───▶│  ModSecurity + OWASP CRS  — open-source    │
+                        │           ↓ proxies to ↓                   │
+                        │         DVWA (internal)                     │
+                        │                                             │
+  HTTP on port 8090 ───▶│  Custom WAF (this project) — hand-built    │
+                        │           ↓ proxies to ↓                   │
+                        │         DVWA (internal)                     │
+                        └─────────────────────────────────────────────┘
 ```
 
-**Three-tier lab (all ports on localhost):**
+| Port | Service | Role |
+|------|---------|------|
+| `8081` | DVWA — unprotected | Raw target; used to confirm vulnerabilities exist |
+| `8080` | ModSecurity + OWASP CRS | Industry-standard open-source WAF (Phase 2) |
+| `8090` | **Custom WAF** (this repo) | Hand-written WAF, no third-party dependencies (Phase 3) |
 
-| Port  | Service              | Description                  |
-|-------|----------------------|------------------------------|
-| 8081  | DVWA (unprotected)   | Direct access, no WAF        |
-| 8080  | ModSecurity + CRS    | Phase 2 open-source WAF      |
-| 8090  | **Custom WAF**       | Phase 3 this project         |
+All three services are spun up together with a single `docker-compose up` command (see below). DVWA is never exposed to the internet — the whole lab runs locally.
+
+---
+
+## How the custom WAF works — the flow of a request
+
+Understanding what the code actually does is the point of this project, so here is the full lifecycle of a request:
+
+```
+ Browser or attacker tool
+         │
+         │  HTTP request (GET /page?id=1' UNION SELECT…)
+         ▼
+ ┌───────────────────────────────────────────────┐
+ │              waf.py — WAFHandler              │
+ │                                               │
+ │  1. Read the full request (method, path,      │
+ │     headers, body)                            │
+ │                                               │
+ │  2. URL-decode every value                    │
+ │     (%27 → ', %3C → <, etc.)                  │
+ │     so encoded evasions don't slip through    │
+ │                                               │
+ │  3. Run all 16 regex rules against:           │
+ │       • the URI / query string                │
+ │       • selected headers (User-Agent, Cookie, │
+ │         Referer, X-Forwarded-For)             │
+ │       • the POST/PUT body                     │
+ │                                               │
+ │  4a. Rule matched → send 403 block page       │
+ │      + write JSON entry to waf_blocked.log    │
+ │                                               │
+ │  4b. No match → forward request to DVWA       │
+ │      and relay the response back              │
+ │      + write line to waf_access.log           │
+ └───────────────────────────────────────────────┘
+         │                         │
+    403 Forbidden             200 OK (or whatever
+    (attacker sees            DVWA responds with)
+     block page)
+```
+
+The WAF is a **reverse proxy**: the browser never talks directly to DVWA. All it knows is that it's talking to whatever is on port 8090.
+
+---
+
+## Project Structure
+
+```
+custom-waf/
+├── waf.py              ← Main WAF (reverse proxy + inspection engine)
+├── test_waf.py         ← Phase 4 attack test suite
+├── Dockerfile          ← Container for the WAF
+├── docker-compose.yml  ← Spins up the full 3-tier lab:
+│                         DVWA + ModSecurity + Custom WAF.
+├── README.md           ← This file
+└── logs/               ← Created automatically at runtime.
+    ├── waf_blocked.log     JSON log of every blocked request.
+    ├── waf_access.log      Apache-style log of every allowed request.
+    └── test_report_*.json  Output from test_waf.py runs.
+```
 
 ---
 
@@ -137,23 +200,6 @@ python3 test_waf.py --target http://localhost:8090 --json
 
 The test suite fires **SQLi, XSS, Path Traversal, CMDi, and Scanner** payloads plus
 **legitimate requests** to measure false positives. A JSON report is saved to `logs/`.
-
----
-
-## Project Structure
-
-```
-custom-waf/
-├── waf.py              ← Main WAF (reverse proxy + inspection engine)
-├── test_waf.py         ← Phase 4 attack test suite
-├── Dockerfile          ← Container for the WAF
-├── docker-compose.yml  ← Full 3-tier lab
-├── README.md           ← This file
-└── logs/               ← Created at runtime
-    ├── waf_blocked.log
-    ├── waf_access.log
-    └── test_report_*.json
-```
 
 ---
 
