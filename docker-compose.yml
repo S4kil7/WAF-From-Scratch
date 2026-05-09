@@ -1,0 +1,60 @@
+version: '3.8'
+
+# ═══════════════════════════════════════════════════════
+#  Full WAF Lab — Phase 1 + 2 + 3
+#  Services:
+#    dvwa-target  → unprotected DVWA  (port 8081)
+#    waf-proxy    → ModSecurity/CRS   (port 8080)
+#    custom-waf   → Python custom WAF (port 8090)
+# ═══════════════════════════════════════════════════════
+
+services:
+
+  # ── Target App (DVWA) ──────────────────────────────
+  dvwa-target:
+    image: vulnerables/web-dvwa
+    container_name: dvwa-app
+    ports:
+      - "8081:80"          # UNPROTECTED — direct access for baseline testing
+    restart: always
+    networks:
+      - waf-net
+
+  # ── Phase 2: Open-Source WAF (ModSecurity + OWASP CRS) ──
+  waf-proxy:
+    image: owasp/modsecurity-crs:nginx
+    container_name: waf-defender
+    ports:
+      - "8080:8080"        # PROTECTED by ModSecurity
+    environment:
+      - PARANOIA=1
+      - BACKEND=http://dvwa-target:80
+      - PROXY_LOCATION=http://dvwa-target:80
+    depends_on:
+      - dvwa-target
+    restart: always
+    networks:
+      - waf-net
+
+  # ── Phase 3: Custom Python WAF ─────────────────────
+  custom-waf:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: custom-waf
+    ports:
+      - "8090:8090"        # PROTECTED by custom WAF
+    environment:
+      - WAF_BACKEND=http://dvwa-target:80
+      - WAF_PORT=8090
+    volumes:
+      - ./logs:/app/logs   # persist logs on the host
+    depends_on:
+      - dvwa-target
+    restart: always
+    networks:
+      - waf-net
+
+networks:
+  waf-net:
+    driver: bridge
