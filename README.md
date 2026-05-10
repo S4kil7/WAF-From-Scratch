@@ -162,7 +162,7 @@ Two log files are written to `logs/`:
 
 ```json
 {
-  "timestamp":  "2025-07-10T14:23:01Z",
+  "timestamp":  "2026-05-10T14:23:01Z",
   "client_ip":  "172.18.0.1",
   "method":     "GET",
   "path":       "/vulnerabilities/sqli/?id=1'+UNION+SELECT+1,2--",
@@ -177,7 +177,7 @@ Two log files are written to `logs/`:
 ### `logs/waf_access.log` — Apache combined-style access log
 
 ```
-172.18.0.1 - - [10/Jul/2025:14:23:05 +0000] "GET / HTTP/1.1" 200
+172.18.0.1 - - [10/May/2026:14:23:05 +0000] "GET / HTTP/1.1" 200
 ```
 
 ---
